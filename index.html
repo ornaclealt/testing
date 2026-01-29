@@ -98,9 +98,7 @@
         // --- 1. FIREBASE SETUP ---
         import { initializeApp } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js";
         import { getAuth, signInWithPopup, GoogleAuthProvider, signOut, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-auth.js";
-        // Added setDoc to imports for Settings
         import { getFirestore, collection, addDoc, getDocs, onSnapshot, query, orderBy, deleteDoc, updateDoc, setDoc, doc, serverTimestamp, where } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js";
-        // Import Storage
         import { getStorage, ref, uploadBytes, getDownloadURL } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-storage.js";
 
         const firebaseConfig = {
@@ -198,7 +196,7 @@
                 return `
                 <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
                     <h2 class="text-3xl font-bold mb-8">Katalog Produk</h2>
-                    ${state.products.length === 0 ? '<p class="text-center py-10">Belum ada produk.</p>' : `<div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-8">${productsHTML}</div>`}
+                    ${state.products.length === 0 ? '<p class="text-center py-10">Belum ada produk atau sedang memuat...</p>' : `<div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-8">${productsHTML}</div>`}
                 </div>
                 `;
             },
@@ -378,26 +376,68 @@
                     }
                 });
 
-                // Listen Products
+                // Listen Products with Error Handling
                 const q = query(collection(db, "products"), orderBy("createdAt", "desc"));
                 onSnapshot(q, (snapshot) => {
                     state.products = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
                     app.render();
-                });
+                }, (error) => app.handleError(error, 'Products'));
 
-                // Listen Settings (QRIS)
+                // Listen Settings (QRIS) with Error Handling
                 onSnapshot(doc(db, "settings", "store_config"), (docSnapshot) => {
                     if (docSnapshot.exists()) {
                         const data = docSnapshot.data();
                         if(data.qrisUrl) {
                             state.qrisUrl = data.qrisUrl;
-                            // Only re-render if on admin page to show update immediately
                             if(state.view === 'admin') app.render(); 
                         }
                     }
-                });
+                }, (error) => app.handleError(error, 'Settings'));
 
                 app.render();
+            },
+
+            // --- HELPER UNTUK MENANGANI ERROR FIREBASE ---
+            handleError: (error, context) => {
+                console.error(`Error in ${context}:`, error);
+                
+                // Cek apakah error karena permission denied
+                if (error.code === 'permission-denied') {
+                    // Gunakan flag agar tidak spam alert jika ada banyak listener gagal bersamaan
+                    if (!window.hasShownPermissionAlert) {
+                        window.hasShownPermissionAlert = true;
+                        
+                        Swal.fire({
+                            icon: 'error',
+                            title: 'Akses Database Ditolak',
+                            html: `
+                                <div class="text-left text-sm">
+                                    <p class="mb-2">Firebase memblokir akses data karena <b>Security Rules</b> belum diatur.</p>
+                                    <p class="mb-2 font-bold">Solusi (Wajib dilakukan di Firebase Console):</p>
+                                    <ol class="list-decimal pl-5 mb-3 space-y-1">
+                                        <li>Buka <b>Firebase Console</b> > <b>Firestore Database</b></li>
+                                        <li>Klik tab <b>Rules</b></li>
+                                        <li>Ganti semua kode di sana dengan kode di bawah ini:</li>
+                                    </ol>
+                                    <div class="bg-gray-800 text-green-400 p-3 rounded font-mono text-xs mb-3 select-all cursor-text">
+                                        rules_version = '2';<br>
+                                        service cloud.firestore {<br>
+                                          &nbsp;&nbsp;match /databases/{database}/documents {<br>
+                                            &nbsp;&nbsp;&nbsp;&nbsp;match /{document=**} {<br>
+                                              &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;allow read, write: if true;<br>
+                                            &nbsp;&nbsp;&nbsp;&nbsp;}<br>
+                                          &nbsp;&nbsp;}<br>
+                                        }
+                                    </div>
+                                    <p>4. Klik tombol <b>Publish</b>.</p>
+                                </div>
+                            `,
+                            width: '600px',
+                            confirmButtonColor: '#3085d6',
+                            confirmButtonText: 'Saya Mengerti, Saya Akan Perbaiki'
+                        });
+                    }
+                }
             },
 
             navigate: (viewName) => {
@@ -439,6 +479,7 @@
                     await signInWithPopup(auth, new GoogleAuthProvider());
                     Swal.fire({ icon: 'success', title: 'Login Berhasil', timer: 1500, showConfirmButton: false });
                 } catch (error) {
+                    console.error(error);
                     Swal.fire('Login Gagal', error.message, 'error');
                 }
             },
@@ -469,7 +510,8 @@
                     Swal.fire('Sukses', 'Produk ditambahkan!', 'success');
                     e.target.reset();
                 } catch (error) {
-                    Swal.fire('Error', error.message, 'error');
+                    app.handleError(error, 'Add Product');
+                    if(error.code !== 'permission-denied') Swal.fire('Error', error.message, 'error');
                 }
             },
 
@@ -512,8 +554,13 @@
                     confirmButtonText: 'Ya, Hapus'
                 }).then(async (result) => {
                     if (result.isConfirmed) {
-                        await deleteDoc(doc(db, "products", id));
-                        Swal.fire('Terhapus!', '', 'success');
+                        try {
+                            await deleteDoc(doc(db, "products", id));
+                            Swal.fire('Terhapus!', '', 'success');
+                        } catch (error) {
+                            app.handleError(error, 'Delete Product');
+                            if(error.code !== 'permission-denied') Swal.fire('Error', 'Gagal menghapus: ' + error.message, 'error');
+                        }
                     }
                 })
             },
@@ -693,8 +740,8 @@
                         });
 
                     } catch (error) {
-                        console.error("Upload Error:", error);
-                        Swal.fire('Gagal Upload', 'Terjadi kesalahan saat upload bukti: ' + error.message, 'error');
+                        app.handleError(error, 'Checkout');
+                        if(error.code !== 'permission-denied') Swal.fire('Gagal Upload', 'Terjadi kesalahan: ' + error.message, 'error');
                     }
                 }
             },
@@ -706,13 +753,17 @@
                 onSnapshot(qMyOrders, (snapshot) => {
                     state.myOrders = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
                     if (state.view === 'myOrders') app.render();
-                });
+                }, (error) => app.handleError(error, 'My Orders'));
 
                 // Admin listens to ALL orders
                 const qAllOrders = query(collection(db, "orders"), orderBy("createdAt", "desc"));
                 onSnapshot(qAllOrders, (snapshot) => {
                     state.allOrders = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
                     if (state.view === 'admin') app.renderAdminOrders();
+                }, (error) => {
+                    // Hanya tampilkan error jika user berada di view admin
+                    // (Supaya user biasa tidak dapat alert error saat login)
+                    if(state.view === 'admin') app.handleError(error, 'All Orders');
                 });
             },
 
@@ -780,7 +831,8 @@
                     Toast.fire({ icon: icon, title: msg });
                     
                 } catch (error) {
-                    Swal.fire('Error', 'Gagal update status: ' + error.message, 'error');
+                    app.handleError(error, 'Update Order');
+                    if(error.code !== 'permission-denied') Swal.fire('Error', 'Gagal update status: ' + error.message, 'error');
                 }
             }
         };
