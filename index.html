@@ -44,6 +44,8 @@
                 <div class="hidden md:flex space-x-8">
                     <button onclick="app.navigate('home')" class="hover:text-blue-600 font-medium transition">Home</button>
                     <button onclick="app.navigate('catalog')" class="hover:text-blue-600 font-medium transition">Katalog</button>
+                    <!-- New Menu for Customers -->
+                    <button onclick="app.navigate('myOrders')" class="hover:text-blue-600 font-medium transition">Pesanan Saya</button>
                     <button onclick="app.navigate('admin')" class="hover:text-blue-600 font-medium transition text-red-500">CMS Admin</button>
                 </div>
                 <div class="flex items-center space-x-4">
@@ -60,7 +62,7 @@
     </nav>
 
     <!-- MAIN CONTENT AREA -->
-    <main id="app-root" class="pt-20 min-h-screen">
+    <main id="app-root" class="pt-20 min-h-screen pb-10">
         <!-- Content Injected via JS -->
         <div id="loading-screen" class="flex items-center justify-center h-[80vh]">
             <div class="loader ease-linear rounded-full border-4 border-t-4 border-gray-200 h-12 w-12 mb-4"></div>
@@ -82,7 +84,7 @@
                 <span>Total:</span>
                 <span id="cart-total">Rp 0</span>
             </div>
-            <button onclick="app.checkout()" class="w-full bg-black text-white py-3 rounded-lg font-bold hover:bg-gray-800 transition transform hover:scale-[1.02]">
+            <button onclick="app.checkoutStep1()" class="w-full bg-black text-white py-3 rounded-lg font-bold hover:bg-gray-800 transition transform hover:scale-[1.02]">
                 Checkout & Bayar
             </button>
         </div>
@@ -95,9 +97,10 @@
     <script type="module">
         // --- 1. FIREBASE SETUP ---
         import { initializeApp } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js";
-        import { getAnalytics } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-analytics.js";
         import { getAuth, signInWithPopup, GoogleAuthProvider, signOut, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-auth.js";
-        import { getFirestore, collection, addDoc, getDocs, onSnapshot, query, orderBy, deleteDoc, doc, serverTimestamp } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js";
+        import { getFirestore, collection, addDoc, getDocs, onSnapshot, query, orderBy, deleteDoc, updateDoc, doc, serverTimestamp, where } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js";
+        // Import Storage
+        import { getStorage, ref, uploadBytes, getDownloadURL } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-storage.js";
 
         const firebaseConfig = {
             apiKey: "AIzaSyApD7dueaFuPv9hHGajcwo17LADEVriqRw",
@@ -110,12 +113,13 @@
             measurementId: "G-RPTFXQK08B"
         };
 
-        let appInstance, auth, db;
+        let appInstance, auth, db, storage;
         
         try {
             appInstance = initializeApp(firebaseConfig);
             auth = getAuth(appInstance);
             db = getFirestore(appInstance);
+            storage = getStorage(appInstance);
             console.log("Firebase Connected Successfully");
         } catch (error) {
             Swal.fire('Error Critical', 'Gagal inisialisasi Firebase. Cek koneksi internet.', 'error');
@@ -125,10 +129,11 @@
         // --- 2. STATE MANAGEMENT ---
         const state = {
             user: null,
-            view: 'home', // home, catalog, admin
+            view: 'home', // home, catalog, admin, myOrders
             cart: [],
             products: [],
-            orders: [],
+            allOrders: [], // For Admin
+            myOrders: [],  // For Customer
             isCartOpen: false
         };
 
@@ -145,7 +150,7 @@
                                         <span class="block text-blue-600 xl:inline">Masa Depan</span>
                                     </h1>
                                     <p class="mt-3 text-base text-gray-500 sm:mt-5 sm:text-lg sm:max-w-xl sm:mx-auto md:mt-5 md:text-xl lg:mx-0">
-                                        Platform e-commerce modern dengan integrasi CMS realtime. Belanja kebutuhanmu dengan cepat, aman, dan tanpa ribet.
+                                        Platform e-commerce modern dengan sistem pembayaran manual & verifikasi admin. Aman dan terpercaya.
                                     </p>
                                     <div class="mt-5 sm:mt-8 sm:flex sm:justify-center lg:justify-start">
                                         <div class="rounded-md shadow">
@@ -162,43 +167,8 @@
                         <img class="h-56 w-full object-cover sm:h-72 md:h-96 lg:w-full lg:h-full" src="https://images.unsplash.com/photo-1483985988355-763728e1935b?ixlib=rb-1.2.1&ixid=MnwxMjA3fDB8MHxwaG90by1wYWdlfHx8fGVufDB8fHx8&auto=format&fit=crop&w=1470&q=80" alt="Shopping">
                     </div>
                 </div>
-                
-                <div class="bg-gray-100 py-12">
-                   <div class="max-w-7xl mx-auto px-4 text-center">
-                        <h2 class="text-3xl font-bold mb-8">Mengapa Memilih Kami?</h2>
-                        <div class="grid grid-cols-1 md:grid-cols-3 gap-8">
-                            <div class="bg-white p-6 rounded-xl shadow-sm">
-                                <i class="fa-solid fa-rocket text-4xl text-blue-500 mb-4"></i>
-                                <h3 class="font-bold text-xl mb-2">Super Cepat</h3>
-                                <p class="text-gray-600">Website dimuat instan tanpa loading lama.</p>
-                            </div>
-                            <div class="bg-white p-6 rounded-xl shadow-sm">
-                                <i class="fa-solid fa-shield-halved text-4xl text-green-500 mb-4"></i>
-                                <h3 class="font-bold text-xl mb-2">Pembayaran Aman</h3>
-                                <p class="text-gray-600">Integrasi gateway simulasi yang terpercaya.</p>
-                            </div>
-                             <div class="bg-white p-6 rounded-xl shadow-sm">
-                                <i class="fa-solid fa-headset text-4xl text-purple-500 mb-4"></i>
-                                <h3 class="font-bold text-xl mb-2">Support 24/7</h3>
-                                <p class="text-gray-600">Bantuan pelanggan kapanpun Anda butuhkan.</p>
-                            </div>
-                        </div>
-                   </div>
-                </div>
             `,
             catalog: () => {
-                if (state.products.length === 0) {
-                    return `
-                    <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-                        <h2 class="text-3xl font-bold mb-6">Katalog Produk</h2>
-                        <div class="text-center py-20 bg-white rounded-xl shadow-sm border border-dashed border-gray-300">
-                            <i class="fa-solid fa-box-open text-6xl text-gray-300 mb-4"></i>
-                            <p class="text-gray-500 text-lg">Belum ada produk.</p>
-                            <p class="text-sm text-gray-400">Silakan login sebagai Admin dan tambahkan produk di menu CMS.</p>
-                        </div>
-                    </div>`;
-                }
-
                 const productsHTML = state.products.map(product => `
                     <div class="bg-white rounded-xl shadow-sm hover:shadow-xl transition duration-300 overflow-hidden border border-gray-100 group">
                         <div class="relative h-64 overflow-hidden bg-gray-200">
@@ -224,37 +194,94 @@
 
                 return `
                 <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-                    <h2 class="text-3xl font-bold mb-8">Katalog Produk Terbaru</h2>
-                    <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-8">
-                        ${productsHTML}
-                    </div>
+                    <h2 class="text-3xl font-bold mb-8">Katalog Produk</h2>
+                    ${state.products.length === 0 ? '<p class="text-center py-10">Belum ada produk.</p>' : `<div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-8">${productsHTML}</div>`}
                 </div>
                 `;
             },
-            admin: () => {
+            myOrders: () => {
+                // View untuk Customer melihat status pesanan
                 if (!state.user) {
                     return `
-                    <div class="flex flex-col items-center justify-center h-[80vh] px-4">
-                        <div class="bg-white p-8 rounded-2xl shadow-xl max-w-md w-full text-center">
-                            <div class="w-20 h-20 bg-red-100 rounded-full flex items-center justify-center mx-auto mb-6">
-                                <i class="fa-solid fa-lock text-3xl text-red-600"></i>
-                            </div>
-                            <h2 class="text-2xl font-bold mb-2">Akses Terbatas</h2>
-                            <p class="text-gray-500 mb-6">Anda harus login menggunakan akun Google untuk mengakses halaman CMS ini.</p>
-                            <button onclick="app.login()" class="w-full bg-blue-600 text-white py-3 rounded-lg font-bold hover:bg-blue-700 transition flex items-center justify-center">
-                                <i class="fa-brands fa-google mr-2"></i> Login Admin
-                            </button>
-                        </div>
+                    <div class="max-w-7xl mx-auto px-4 py-20 text-center">
+                        <i class="fa-solid fa-user-lock text-6xl text-gray-300 mb-4"></i>
+                        <h2 class="text-2xl font-bold">Silakan Login</h2>
+                        <p class="text-gray-500 mb-6">Anda perlu login untuk melihat riwayat pesanan.</p>
+                        <button onclick="app.login()" class="bg-blue-600 text-white px-6 py-2 rounded-lg">Login Google</button>
                     </div>`;
                 }
+
+                if (state.myOrders.length === 0) {
+                    return `
+                    <div class="max-w-7xl mx-auto px-4 py-20 text-center">
+                        <i class="fa-solid fa-receipt text-6xl text-gray-300 mb-4"></i>
+                        <h2 class="text-2xl font-bold">Belum Ada Pesanan</h2>
+                        <p class="text-gray-500 mb-6">Yuk mulai belanja di katalog!</p>
+                        <button onclick="app.navigate('catalog')" class="bg-blue-600 text-white px-6 py-2 rounded-lg">Ke Katalog</button>
+                    </div>`;
+                }
+
+                const ordersHTML = state.myOrders.map(order => {
+                    let statusColor = 'bg-yellow-100 text-yellow-800';
+                    let statusText = 'Menunggu Konfirmasi Admin';
+                    if (order.status === 'PAID') {
+                        statusColor = 'bg-green-100 text-green-800';
+                        statusText = 'Lunas / Diterima';
+                    } else if (order.status === 'REJECTED') {
+                        statusColor = 'bg-red-100 text-red-800';
+                        statusText = 'Ditolak';
+                    }
+
+                    return `
+                    <div class="bg-white rounded-xl shadow-md p-6 mb-4 border border-gray-100">
+                        <div class="flex flex-col md:flex-row justify-between items-start md:items-center mb-4 border-b pb-4">
+                            <div>
+                                <p class="text-xs text-gray-400">Order ID: #${order.id.substr(0,8)}</p>
+                                <p class="text-sm font-bold text-gray-800">${new Date(order.createdAt?.seconds * 1000).toLocaleDateString('id-ID')}</p>
+                            </div>
+                            <span class="${statusColor} px-3 py-1 rounded-full text-xs font-bold mt-2 md:mt-0 uppercase tracking-wide flex items-center">
+                                <span class="w-2 h-2 rounded-full bg-current mr-2 animate-pulse"></span> ${statusText}
+                            </span>
+                        </div>
+                        <div class="space-y-2 mb-4">
+                            ${order.items.map(item => `
+                                <div class="flex justify-between text-sm">
+                                    <span>${item.name} <span class="text-gray-400">x${item.qty}</span></span>
+                                    <span class="font-medium">Rp ${(item.price * item.qty).toLocaleString()}</span>
+                                </div>
+                            `).join('')}
+                        </div>
+                        <div class="flex flex-col md:flex-row justify-between items-center bg-gray-50 p-3 rounded-lg">
+                            <div class="flex items-center space-x-2 mb-2 md:mb-0">
+                                <span class="text-gray-500 text-sm">Bukti Pembayaran:</span>
+                                <a href="${order.proofImage}" target="_blank" class="text-blue-600 text-sm hover:underline flex items-center">
+                                    <i class="fa-solid fa-image mr-1"></i> Lihat Foto
+                                </a>
+                            </div>
+                            <div class="text-xl font-bold text-blue-600">Total: Rp ${order.total.toLocaleString()}</div>
+                        </div>
+                    </div>
+                    `;
+                }).join('');
+
+                return `
+                <div class="max-w-4xl mx-auto px-4 py-8">
+                    <h2 class="text-3xl font-bold mb-8">Pesanan Saya</h2>
+                    <div class="space-y-6">
+                        ${ordersHTML}
+                    </div>
+                </div>`;
+            },
+            admin: () => {
+                if (!state.user) return UI.myOrders(); // Reuse login prompt
 
                 // CMS DASHBOARD
                 return `
                 <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
                     <div class="flex justify-between items-center mb-8">
                         <div>
-                            <h2 class="text-3xl font-bold">CMS Dashboard</h2>
-                            <p class="text-gray-500">Selamat datang, ${state.user.displayName}</p>
+                            <h2 class="text-3xl font-bold">CMS Admin</h2>
+                            <p class="text-gray-500">Kelola Produk & Konfirmasi Pembayaran</p>
                         </div>
                         <button onclick="app.logout()" class="text-red-600 font-medium hover:underline">Logout</button>
                     </div>
@@ -267,70 +294,46 @@
                                     <i class="fa-solid fa-plus-circle text-blue-500 mr-2"></i> Tambah Produk
                                 </h3>
                                 <form onsubmit="app.addProduct(event)" class="space-y-4">
-                                    <div>
-                                        <label class="block text-sm font-medium text-gray-700 mb-1">Nama Produk</label>
-                                        <input type="text" id="p-name" required class="w-full px-4 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 outline-none">
-                                    </div>
-                                    <div>
-                                        <label class="block text-sm font-medium text-gray-700 mb-1">Harga (Rp)</label>
-                                        <input type="number" id="p-price" required class="w-full px-4 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 outline-none">
-                                    </div>
-                                    <div>
-                                        <label class="block text-sm font-medium text-gray-700 mb-1">Stok</label>
-                                        <input type="number" id="p-stock" required class="w-full px-4 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 outline-none">
-                                    </div>
-                                    <div>
-                                        <label class="block text-sm font-medium text-gray-700 mb-1">URL Gambar</label>
-                                        <input type="url" id="p-image" placeholder="https://..." class="w-full px-4 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 outline-none">
-                                        <p class="text-xs text-gray-400 mt-1">*Gunakan link gambar langsung</p>
-                                    </div>
-                                    <div>
-                                        <label class="block text-sm font-medium text-gray-700 mb-1">Deskripsi</label>
-                                        <textarea id="p-desc" rows="3" required class="w-full px-4 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"></textarea>
-                                    </div>
-                                    <button type="submit" class="w-full bg-blue-600 text-white py-2 rounded-lg font-bold hover:bg-blue-700 transition">
-                                        Simpan Produk
-                                    </button>
+                                    <div><label class="text-sm font-medium">Nama Produk</label><input type="text" id="p-name" required class="w-full px-4 py-2 border rounded-lg"></div>
+                                    <div><label class="text-sm font-medium">Harga (Rp)</label><input type="number" id="p-price" required class="w-full px-4 py-2 border rounded-lg"></div>
+                                    <div><label class="text-sm font-medium">Stok</label><input type="number" id="p-stock" required class="w-full px-4 py-2 border rounded-lg"></div>
+                                    <div><label class="text-sm font-medium">URL Gambar</label><input type="url" id="p-image" placeholder="https://..." class="w-full px-4 py-2 border rounded-lg"></div>
+                                    <div><label class="text-sm font-medium">Deskripsi</label><textarea id="p-desc" rows="3" required class="w-full px-4 py-2 border rounded-lg"></textarea></div>
+                                    <button type="submit" class="w-full bg-blue-600 text-white py-2 rounded-lg font-bold">Simpan Produk</button>
                                 </form>
                             </div>
                         </div>
 
-                        <!-- LIST PRODUK & ORDER -->
+                        <!-- MANAGEMENT AREA -->
                         <div class="lg:col-span-2 space-y-8">
-                            <!-- LIST PRODUK -->
-                            <div class="bg-white rounded-xl shadow-md p-6">
-                                <h3 class="text-xl font-bold mb-4">Daftar Produk (${state.products.length})</h3>
-                                <div class="overflow-x-auto">
-                                    <table class="w-full text-left">
-                                        <thead class="bg-gray-50 text-gray-600 uppercase text-xs">
-                                            <tr>
-                                                <th class="px-4 py-3">Produk</th>
-                                                <th class="px-4 py-3">Harga</th>
-                                                <th class="px-4 py-3">Aksi</th>
-                                            </tr>
-                                        </thead>
-                                        <tbody class="divide-y divide-gray-100 text-sm">
-                                            ${state.products.map(p => `
-                                            <tr>
-                                                <td class="px-4 py-3 font-medium text-gray-900">${p.name}</td>
-                                                <td class="px-4 py-3">Rp ${parseInt(p.price).toLocaleString('id-ID')}</td>
-                                                <td class="px-4 py-3">
-                                                    <button onclick="app.deleteProduct('${p.id}')" class="text-red-500 hover:text-red-700 bg-red-50 p-2 rounded-lg">
-                                                        <i class="fa-solid fa-trash"></i>
-                                                    </button>
-                                                </td>
-                                            </tr>
-                                            `).join('')}
-                                        </tbody>
-                                    </table>
+                            
+                            <!-- ORDER APPROVAL SECTION -->
+                            <div class="bg-white rounded-xl shadow-md p-6 border-l-4 border-yellow-400">
+                                <h3 class="text-xl font-bold mb-4 flex items-center">
+                                    <i class="fa-solid fa-money-bill-wave text-yellow-500 mr-2"></i> Verifikasi Pembayaran
+                                </h3>
+                                <div id="admin-orders-list" class="space-y-4">
+                                    <p class="text-gray-400 italic">Memuat order...</p>
                                 </div>
                             </div>
 
-                            <!-- TRANSAKSI -->
+                            <!-- LIST PRODUK -->
                             <div class="bg-white rounded-xl shadow-md p-6">
-                                <h3 class="text-xl font-bold mb-4">Riwayat Order (Firestore)</h3>
-                                <div id="order-list" class="space-y-4">
-                                    <p class="text-gray-400 italic text-sm">Memuat data order...</p>
+                                <h3 class="text-xl font-bold mb-4">Daftar Produk</h3>
+                                <div class="overflow-x-auto">
+                                    <table class="w-full text-left text-sm">
+                                        <thead class="bg-gray-50 uppercase"><tr><th class="p-3">Nama</th><th class="p-3">Harga</th><th class="p-3">Aksi</th></tr></thead>
+                                        <tbody>
+                                            ${state.products.map(p => `
+                                            <tr class="border-b">
+                                                <td class="p-3 font-medium">${p.name}</td>
+                                                <td class="p-3">Rp ${parseInt(p.price).toLocaleString('id-ID')}</td>
+                                                <td class="p-3">
+                                                    <button onclick="app.deleteProduct('${p.id}')" class="text-red-500 hover:bg-red-50 p-2 rounded"><i class="fa-solid fa-trash"></i></button>
+                                                </td>
+                                            </tr>`).join('')}
+                                        </tbody>
+                                    </table>
                                 </div>
                             </div>
                         </div>
@@ -343,24 +346,19 @@
         // --- 4. APP LOGIC CONTROLLER ---
         window.app = {
             init: () => {
-                // Listen to Auth
                 onAuthStateChanged(auth, (user) => {
                     state.user = user;
                     app.renderAuth();
-                    if(state.view === 'admin') app.render(); // Re-render admin if on that page
-                    
-                    // If user is logged in, also listen to orders
-                    if (user) app.listenOrders();
+                    if (user) {
+                        app.listenOrders(user);
+                        if(state.view === 'myOrders' || state.view === 'admin') app.render();
+                    }
                 });
 
-                // Listen to Products (Realtime)
                 const q = query(collection(db, "products"), orderBy("createdAt", "desc"));
                 onSnapshot(q, (snapshot) => {
                     state.products = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-                    app.render(); // Re-render whichever page is active
-                }, (error) => {
-                    console.error("Error fetching products:", error);
-                    // Silently fail if permission denied (guest mode), or show empty
+                    app.render();
                 });
 
                 app.render();
@@ -376,9 +374,9 @@
                 const root = document.getElementById('app-root');
                 if (UI[state.view]) {
                     root.innerHTML = UI[state.view]();
-                    // Load orders manually if on admin page and we have data
-                    if (state.view === 'admin' && state.user && state.orders.length > 0) {
-                        app.renderOrders();
+                    // Khusus Admin, render order list manual
+                    if (state.view === 'admin' && state.user) {
+                        app.renderAdminOrders();
                     }
                 }
                 app.updateCartUI();
@@ -389,6 +387,7 @@
                 if (state.user) {
                     container.innerHTML = `
                         <div class="flex items-center space-x-2">
+                             <span class="text-sm font-medium hidden md:block">${state.user.displayName.split(' ')[0]}</span>
                             <img src="${state.user.photoURL}" class="w-8 h-8 rounded-full border border-gray-300">
                         </div>
                     `;
@@ -400,33 +399,24 @@
             },
 
             login: async () => {
-                const provider = new GoogleAuthProvider();
                 try {
-                    await signInWithPopup(auth, provider);
-                    Swal.fire({
-                        icon: 'success',
-                        title: 'Login Berhasil',
-                        text: 'Selamat datang di Admin Panel',
-                        timer: 1500,
-                        showConfirmButton: false
-                    });
+                    await signInWithPopup(auth, new GoogleAuthProvider());
+                    Swal.fire({ icon: 'success', title: 'Login Berhasil', timer: 1500, showConfirmButton: false });
                 } catch (error) {
-                    console.error(error);
-                    let msg = error.message;
-                    if(error.code === 'auth/popup-closed-by-user') msg = "Login dibatalkan.";
-                    if(error.code === 'auth/operation-not-allowed') msg = "Google Auth belum diaktifkan di Firebase Console!";
-                    Swal.fire('Login Gagal', msg, 'error');
+                    Swal.fire('Login Gagal', error.message, 'error');
                 }
             },
 
             logout: () => {
                 signOut(auth).then(() => {
+                    state.myOrders = [];
+                    state.allOrders = [];
                     app.navigate('home');
                     Swal.fire('Logged Out', 'Sampai jumpa lagi!', 'success');
                 });
             },
 
-            // --- CMS FUNCTIONS ---
+            // --- CMS FUNCTIONS (PRODUCT) ---
             addProduct: async (e) => {
                 e.preventDefault();
                 const name = document.getElementById('p-name').value;
@@ -440,71 +430,42 @@
                         name, price, stock, description: desc, image,
                         createdAt: serverTimestamp()
                     });
-                    Swal.fire('Sukses', 'Produk berhasil ditambahkan ke database!', 'success');
+                    Swal.fire('Sukses', 'Produk ditambahkan!', 'success');
                     e.target.reset();
                 } catch (error) {
-                    console.error(error);
-                    if(error.code === 'permission-denied') {
-                        Swal.fire('Akses Ditolak', 'Pastikan Rules Firestore Anda diset ke Test Mode atau Allow All sementara.', 'error');
-                    } else {
-                        Swal.fire('Error', 'Gagal menambah produk: ' + error.message, 'error');
-                    }
+                    Swal.fire('Error', error.message, 'error');
                 }
             },
 
             deleteProduct: async (id) => {
                 Swal.fire({
-                    title: 'Hapus Produk?',
-                    text: "Data akan hilang permanen dari database.",
+                    title: 'Hapus?',
                     icon: 'warning',
                     showCancelButton: true,
-                    confirmButtonColor: '#d33',
                     confirmButtonText: 'Ya, Hapus'
                 }).then(async (result) => {
                     if (result.isConfirmed) {
-                        try {
-                            await deleteDoc(doc(db, "products", id));
-                            Swal.fire('Terhapus!', 'Produk telah dihapus.', 'success');
-                        } catch (error) {
-                            Swal.fire('Gagal', 'Anda tidak memiliki izin menghapus.', 'error');
-                        }
+                        await deleteDoc(doc(db, "products", id));
+                        Swal.fire('Terhapus!', '', 'success');
                     }
                 })
             },
 
-            // --- CART & PAYMENT ---
+            // --- CART & MANUAL CHECKOUT ---
             addToCart: (productId) => {
                 const product = state.products.find(p => p.id === productId);
                 const existing = state.cart.find(i => i.id === productId);
-                
-                if (existing) {
-                    existing.qty += 1;
-                } else {
-                    state.cart.push({ ...product, qty: 1 });
-                }
-                
+                if (existing) existing.qty += 1;
+                else state.cart.push({ ...product, qty: 1 });
                 app.updateCartUI();
-                app.toggleCart(true); // Open cart automatically
-                
-                const Toast = Swal.mixin({
-                    toast: true,
-                    position: 'top-end',
-                    showConfirmButton: false,
-                    timer: 3000
-                });
-                Toast.fire({ icon: 'success', title: 'Masuk Keranjang' });
+                app.toggleCart(true);
             },
 
             updateCartUI: () => {
                 const count = state.cart.reduce((acc, item) => acc + item.qty, 0);
                 const badge = document.getElementById('cart-count');
-                
-                if (count > 0) {
-                    badge.classList.remove('hidden');
-                    badge.innerText = count;
-                } else {
-                    badge.classList.add('hidden');
-                }
+                if (count > 0) { badge.classList.remove('hidden'); badge.innerText = count; } 
+                else { badge.classList.add('hidden'); }
 
                 const cartItems = document.getElementById('cart-items');
                 if (!cartItems) return;
@@ -522,31 +483,19 @@
                         <div class="flex items-center justify-between bg-white p-3 rounded-lg border">
                             <div class="flex items-center space-x-3">
                                 <img src="${item.image}" class="w-12 h-12 object-cover rounded-md bg-gray-100">
-                                <div>
-                                    <h4 class="font-bold text-sm text-gray-800 line-clamp-1">${item.name}</h4>
-                                    <p class="text-xs text-gray-500">x${item.qty} @ Rp ${item.price}</p>
-                                </div>
+                                <div><h4 class="font-bold text-sm text-gray-800 line-clamp-1">${item.name}</h4><p class="text-xs text-gray-500">x${item.qty} @ Rp ${item.price}</p></div>
                             </div>
                             <div class="font-bold text-blue-600">Rp ${(item.price * item.qty).toLocaleString()}</div>
                         </div>
                     `;
                 }).join('');
-                
                 document.getElementById('cart-total').innerText = 'Rp ' + total.toLocaleString('id-ID');
             },
 
             toggleCart: (forceOpen = null) => {
                 const sidebar = document.getElementById('cart-sidebar');
                 const overlay = document.getElementById('cart-overlay');
-                
-                if (forceOpen === true) {
-                    state.isCartOpen = true;
-                } else if (forceOpen === false) {
-                    state.isCartOpen = false;
-                } else {
-                    state.isCartOpen = !state.isCartOpen;
-                }
-
+                state.isCartOpen = forceOpen === null ? !state.isCartOpen : forceOpen;
                 if (state.isCartOpen) {
                     sidebar.classList.remove('translate-x-full');
                     overlay.classList.remove('hidden');
@@ -558,112 +507,218 @@
                 }
             },
 
-            checkout: async () => {
+            // --- CHECKOUT FLOW ---
+            checkoutStep1: async () => {
                 if (state.cart.length === 0) return;
+                if (!state.user) {
+                    app.toggleCart(false);
+                    Swal.fire({
+                        icon: 'info',
+                        title: 'Silakan Login',
+                        text: 'Anda harus login Google untuk mempermudah pelacakan status pesanan.',
+                        confirmButtonText: 'Login Sekarang',
+                        showCancelButton: true
+                    }).then((result) => {
+                        if (result.isConfirmed) app.login();
+                    });
+                    return;
+                }
 
-                // Simulasi Form Pembayaran
                 const { value: formValues } = await Swal.fire({
-                    title: 'Pembayaran & Pengiriman',
+                    title: 'Info Pengiriman',
                     html:
-                        '<input id="swal-input1" class="swal2-input" placeholder="Nama Lengkap">' +
-                        '<input id="swal-input2" class="swal2-input" placeholder="Alamat Pengiriman">' +
-                        '<select id="swal-input3" class="swal2-input"><option value="BCA">Transfer BCA</option><option value="QRIS">QRIS</option></select>',
+                        '<input id="swal-name" class="swal2-input" placeholder="Nama Penerima" value="' + state.user.displayName + '">' +
+                        '<textarea id="swal-address" class="swal2-textarea" placeholder="Alamat Lengkap & No HP"></textarea>',
                     focusConfirm: false,
                     showCancelButton: true,
-                    confirmButtonText: 'Bayar Sekarang',
+                    confirmButtonText: 'Lanjut ke Pembayaran',
                     preConfirm: () => {
-                        return [
-                            document.getElementById('swal-input1').value,
-                            document.getElementById('swal-input2').value,
-                            document.getElementById('swal-input3').value
-                        ]
+                        const name = document.getElementById('swal-name').value;
+                        const address = document.getElementById('swal-address').value;
+                        if (!name || !address) Swal.showValidationMessage('Mohon lengkapi data');
+                        return { name, address };
                     }
                 });
 
                 if (formValues) {
-                    const [name, address, method] = formValues;
-                    if(!name || !address) return Swal.fire('Error', 'Mohon lengkapi data', 'error');
-
-                    // Simulasi Loading Payment Gateway
-                    Swal.fire({
-                        title: 'Memproses Pembayaran...',
-                        html: 'Menghubungkan ke gateway pembayaran',
-                        timer: 2000,
-                        timerProgressBar: true,
-                        didOpen: () => {
-                            Swal.showLoading()
-                        }
-                    }).then(async () => {
-                        // Simpan Order ke Firestore
-                        try {
-                            const total = state.cart.reduce((acc, item) => acc + item.price * item.qty, 0);
-                            await addDoc(collection(db, "orders"), {
-                                customer: name,
-                                address: address,
-                                paymentMethod: method,
-                                items: state.cart,
-                                total: total,
-                                status: 'PAID',
-                                createdAt: serverTimestamp()
-                            });
-
-                            state.cart = [];
-                            app.toggleCart(false);
-                            app.updateCartUI();
-
-                            Swal.fire({
-                                icon: 'success',
-                                title: 'Pembayaran Berhasil!',
-                                text: `Terima kasih ${name}, pesanan Anda sedang diproses.`,
-                            });
-                        } catch (error) {
-                            console.error(error);
-                            Swal.fire('Gagal menyimpan order', 'Cek koneksi atau permission.', 'error');
-                        }
-                    });
+                    app.checkoutStep2_Payment(formValues);
                 }
             },
 
-            // --- ORDER MANAGEMENT ---
-            listenOrders: () => {
-                const q = query(collection(db, "orders"), orderBy("createdAt", "desc"));
-                onSnapshot(q, (snapshot) => {
-                    state.orders = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-                    if (state.view === 'admin') app.renderOrders();
+            checkoutStep2_Payment: async (shippingInfo) => {
+                const totalAmount = state.cart.reduce((acc, item) => acc + item.price * item.qty, 0);
+                
+                // Show QRIS PopUp with File Upload
+                const { value: file } = await Swal.fire({
+                    title: 'Scan QRIS & Upload Bukti',
+                    html: `
+                        <div class="text-center mb-4">
+                            <p class="mb-2 text-sm text-gray-500">Silakan scan QRIS di bawah ini:</p>
+                            <div class="bg-gray-100 p-4 inline-block rounded-lg mb-2">
+                                <img src="https://upload.wikimedia.org/wikipedia/commons/thumb/d/d0/QR_code_for_mobile_English_Wikipedia.svg/1200px-QR_code_for_mobile_English_Wikipedia.svg.png" 
+                                     class="w-48 h-48 object-contain mx-auto mix-blend-multiply" alt="QRIS Code">
+                            </div>
+                            <p class="font-bold text-xl text-blue-600 mb-1">Rp ${totalAmount.toLocaleString('id-ID')}</p>
+                            <p class="text-xs text-red-500 mb-4">*Transfer sesuai nominal tepat</p>
+                            
+                            <hr class="my-4">
+                            
+                            <p class="mb-2 text-sm font-bold">Upload Bukti Transfer (Wajib):</p>
+                            <input type="file" id="proof-file" accept="image/*" class="block w-full text-sm text-gray-500
+                              file:mr-4 file:py-2 file:px-4
+                              file:rounded-full file:border-0
+                              file:text-sm file:font-semibold
+                              file:bg-blue-50 file:text-blue-700
+                              hover:file:bg-blue-100
+                            "/>
+                        </div>
+                    `,
+                    showCancelButton: true,
+                    confirmButtonText: 'Kirim Bukti Pembayaran',
+                    preConfirm: () => {
+                        const fileInput = document.getElementById('proof-file');
+                        if (!fileInput.files.length) {
+                            Swal.showValidationMessage('Anda wajib upload foto bukti transfer!');
+                        }
+                        return fileInput.files[0];
+                    }
+                });
+
+                if (file) {
+                    // Start Upload Process
+                    Swal.fire({
+                        title: 'Mengupload Bukti...',
+                        html: 'Mohon tunggu sebentar',
+                        allowOutsideClick: false,
+                        didOpen: () => { Swal.showLoading(); }
+                    });
+
+                    try {
+                        // 1. Upload Image to Storage
+                        const storageRef = ref(storage, 'proofs/' + Date.now() + '_' + file.name);
+                        const snapshot = await uploadBytes(storageRef, file);
+                        const downloadURL = await getDownloadURL(snapshot.ref);
+
+                        // 2. Save Order to Firestore
+                        await addDoc(collection(db, "orders"), {
+                            userId: state.user.uid,
+                            customerName: shippingInfo.name,
+                            address: shippingInfo.address,
+                            items: state.cart,
+                            total: totalAmount,
+                            proofImage: downloadURL,
+                            status: 'PENDING', // Waiting for Admin
+                            createdAt: serverTimestamp()
+                        });
+
+                        // 3. Reset & Success
+                        state.cart = [];
+                        app.toggleCart(false);
+                        app.updateCartUI();
+                        
+                        Swal.fire({
+                            icon: 'success',
+                            title: 'Pesanan Diterima!',
+                            text: 'Admin sedang memverifikasi bukti pembayaran Anda. Cek status di menu "Pesanan Saya".',
+                            confirmButtonText: 'Lihat Status',
+                        }).then(() => {
+                            app.navigate('myOrders');
+                        });
+
+                    } catch (error) {
+                        console.error("Upload Error:", error);
+                        Swal.fire('Gagal Upload', 'Terjadi kesalahan saat upload bukti: ' + error.message, 'error');
+                    }
+                }
+            },
+
+            // --- ADMIN & ORDER MANAGEMENT ---
+            listenOrders: (user) => {
+                // Customer listens only to their orders
+                const qMyOrders = query(collection(db, "orders"), where("userId", "==", user.uid), orderBy("createdAt", "desc"));
+                onSnapshot(qMyOrders, (snapshot) => {
+                    state.myOrders = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+                    if (state.view === 'myOrders') app.render();
+                });
+
+                // Admin listens to ALL orders (Warning: In production, secure this with Rules)
+                // We assume current user is admin for demo simplicity if they access /admin
+                const qAllOrders = query(collection(db, "orders"), orderBy("createdAt", "desc"));
+                onSnapshot(qAllOrders, (snapshot) => {
+                    state.allOrders = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+                    if (state.view === 'admin') app.renderAdminOrders();
                 });
             },
 
-            renderOrders: () => {
-                const container = document.getElementById('order-list');
+            renderAdminOrders: () => {
+                const container = document.getElementById('admin-orders-list');
                 if (!container) return;
 
-                if (state.orders.length === 0) {
-                    container.innerHTML = '<p class="text-gray-400">Belum ada transaksi.</p>';
+                const pendingOrders = state.allOrders.filter(o => o.status === 'PENDING');
+                
+                if (pendingOrders.length === 0) {
+                    container.innerHTML = '<p class="text-gray-500 text-sm py-4">Tidak ada pembayaran yang perlu diverifikasi saat ini.</p>';
                     return;
                 }
 
-                container.innerHTML = state.orders.map(order => `
-                    <div class="border border-gray-100 rounded-lg p-4 mb-3 hover:bg-gray-50">
-                        <div class="flex justify-between items-start mb-2">
+                container.innerHTML = pendingOrders.map(order => `
+                    <div class="border border-yellow-200 bg-yellow-50 rounded-lg p-4 mb-4">
+                        <div class="flex justify-between items-start mb-3">
                             <div>
-                                <h4 class="font-bold text-gray-800">${order.customer}</h4>
+                                <h4 class="font-bold text-gray-800">${order.customerName}</h4>
                                 <p class="text-xs text-gray-500">${order.address}</p>
+                                <p class="text-xs text-gray-400 mt-1">${new Date(order.createdAt?.seconds * 1000).toLocaleString()}</p>
                             </div>
-                            <span class="bg-green-100 text-green-800 text-xs px-2 py-1 rounded font-bold">${order.status}</span>
+                            <span class="bg-yellow-200 text-yellow-800 text-xs px-2 py-1 rounded font-bold uppercase">Menunggu ACC</span>
                         </div>
-                        <div class="text-sm text-gray-600 mb-2">
-                            ${order.items.map(i => `${i.name} (x${i.qty})`).join(', ')}
+                        
+                        <div class="flex space-x-3 mb-4">
+                            <div class="w-1/3">
+                                <a href="${order.proofImage}" target="_blank">
+                                    <img src="${order.proofImage}" class="w-full h-20 object-cover rounded border border-gray-300 hover:opacity-75 transition" title="Klik untuk memperbesar">
+                                </a>
+                            </div>
+                            <div class="w-2/3 text-sm">
+                                <p class="font-bold text-gray-700">Total: Rp ${order.total.toLocaleString()}</p>
+                                <p class="text-xs text-gray-500 mt-1 line-clamp-2">${order.items.map(i => `${i.name} (x${i.qty})`).join(', ')}</p>
+                            </div>
                         </div>
-                        <div class="flex justify-between items-center border-t pt-2 mt-2">
-                            <span class="text-xs text-gray-400">${order.paymentMethod}</span>
-                            <span class="font-bold text-blue-600">Total: Rp ${order.total.toLocaleString()}</span>
+
+                        <div class="flex space-x-2">
+                            <button onclick="app.updateOrderStatus('${order.id}', 'PAID')" class="flex-1 bg-green-600 text-white py-2 rounded text-sm font-bold hover:bg-green-700 transition">
+                                <i class="fa-solid fa-check mr-1"></i> Terima (ACC)
+                            </button>
+                            <button onclick="app.updateOrderStatus('${order.id}', 'REJECTED')" class="flex-1 bg-red-600 text-white py-2 rounded text-sm font-bold hover:bg-red-700 transition">
+                                <i class="fa-solid fa-times mr-1"></i> Tolak
+                            </button>
                         </div>
                     </div>
                 `).join('');
+            },
+
+            updateOrderStatus: async (orderId, newStatus) => {
+                try {
+                    await updateDoc(doc(db, "orders", orderId), {
+                        status: newStatus
+                    });
+                    
+                    const msg = newStatus === 'PAID' ? 'Pembayaran diterima.' : 'Pembayaran ditolak.';
+                    const icon = newStatus === 'PAID' ? 'success' : 'error';
+                    
+                    const Toast = Swal.mixin({
+                        toast: true,
+                        position: 'top-end',
+                        showConfirmButton: false,
+                        timer: 3000
+                    });
+                    Toast.fire({ icon: icon, title: msg });
+                    
+                } catch (error) {
+                    Swal.fire('Error', 'Gagal update status: ' + error.message, 'error');
+                }
             }
         };
 
-        // START APP
         app.init();
     </script>
 </body>
