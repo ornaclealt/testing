@@ -98,7 +98,8 @@
         // --- 1. FIREBASE SETUP ---
         import { initializeApp } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js";
         import { getAuth, signInWithPopup, GoogleAuthProvider, signOut, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-auth.js";
-        import { getFirestore, collection, addDoc, getDocs, onSnapshot, query, orderBy, deleteDoc, updateDoc, doc, serverTimestamp, where } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js";
+        // Added setDoc to imports for Settings
+        import { getFirestore, collection, addDoc, getDocs, onSnapshot, query, orderBy, deleteDoc, updateDoc, setDoc, doc, serverTimestamp, where } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js";
         // Import Storage
         import { getStorage, ref, uploadBytes, getDownloadURL } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-storage.js";
 
@@ -134,6 +135,8 @@
             products: [],
             allOrders: [], // For Admin
             myOrders: [],  // For Customer
+            // Default QRIS Placeholder
+            qrisUrl: "https://upload.wikimedia.org/wikipedia/commons/thumb/d/d0/QR_code_for_mobile_English_Wikipedia.svg/1200px-QR_code_for_mobile_English_Wikipedia.svg.png", 
             isCartOpen: false
         };
 
@@ -200,7 +203,6 @@
                 `;
             },
             myOrders: () => {
-                // View untuk Customer melihat status pesanan
                 if (!state.user) {
                     return `
                     <div class="max-w-7xl mx-auto px-4 py-20 text-center">
@@ -287,9 +289,11 @@
                     </div>
 
                     <div class="grid grid-cols-1 lg:grid-cols-3 gap-8">
-                        <!-- FORM INPUT PRODUK -->
-                        <div class="lg:col-span-1">
-                            <div class="bg-white rounded-xl shadow-md p-6 sticky top-24">
+                        <!-- KOLOM KIRI: SETTING & TAMBAH PRODUK -->
+                        <div class="lg:col-span-1 space-y-8">
+                            
+                            <!-- 1. FORM INPUT PRODUK -->
+                            <div class="bg-white rounded-xl shadow-md p-6">
                                 <h3 class="text-xl font-bold mb-4 flex items-center">
                                     <i class="fa-solid fa-plus-circle text-blue-500 mr-2"></i> Tambah Produk
                                 </h3>
@@ -302,9 +306,28 @@
                                     <button type="submit" class="w-full bg-blue-600 text-white py-2 rounded-lg font-bold">Simpan Produk</button>
                                 </form>
                             </div>
+
+                            <!-- 2. PENGATURAN QRIS (BARU) -->
+                            <div class="bg-white rounded-xl shadow-md p-6 border-t-4 border-purple-500">
+                                <h3 class="text-xl font-bold mb-4 flex items-center">
+                                    <i class="fa-solid fa-qrcode text-purple-500 mr-2"></i> Pengaturan QRIS
+                                </h3>
+                                <div class="mb-4 text-center bg-gray-50 p-4 rounded-lg">
+                                    <p class="text-xs text-gray-500 mb-2">Tampilan di Customer:</p>
+                                    <img src="${state.qrisUrl}" class="w-32 h-32 object-contain mx-auto border rounded bg-white p-1 shadow-sm">
+                                </div>
+                                <form onsubmit="app.uploadQRIS(event)">
+                                    <label class="block text-sm font-medium text-gray-700 mb-1">Upload QRIS Baru</label>
+                                    <input type="file" id="admin-qris-file" accept="image/*" class="w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-purple-50 file:text-purple-700 hover:file:bg-purple-100" required>
+                                    <button type="submit" class="w-full bg-purple-600 text-white py-2 rounded-lg font-bold mt-4 hover:bg-purple-700 transition">
+                                        <i class="fa-solid fa-cloud-upload-alt mr-2"></i> Ganti QRIS
+                                    </button>
+                                </form>
+                            </div>
+
                         </div>
 
-                        <!-- MANAGEMENT AREA -->
+                        <!-- KOLOM KANAN: MANAGEMENT AREA -->
                         <div class="lg:col-span-2 space-y-8">
                             
                             <!-- ORDER APPROVAL SECTION -->
@@ -355,10 +378,23 @@
                     }
                 });
 
+                // Listen Products
                 const q = query(collection(db, "products"), orderBy("createdAt", "desc"));
                 onSnapshot(q, (snapshot) => {
                     state.products = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
                     app.render();
+                });
+
+                // Listen Settings (QRIS)
+                onSnapshot(doc(db, "settings", "store_config"), (docSnapshot) => {
+                    if (docSnapshot.exists()) {
+                        const data = docSnapshot.data();
+                        if(data.qrisUrl) {
+                            state.qrisUrl = data.qrisUrl;
+                            // Only re-render if on admin page to show update immediately
+                            if(state.view === 'admin') app.render(); 
+                        }
+                    }
                 });
 
                 app.render();
@@ -416,7 +452,7 @@
                 });
             },
 
-            // --- CMS FUNCTIONS (PRODUCT) ---
+            // --- CMS FUNCTIONS ---
             addProduct: async (e) => {
                 e.preventDefault();
                 const name = document.getElementById('p-name').value;
@@ -434,6 +470,37 @@
                     e.target.reset();
                 } catch (error) {
                     Swal.fire('Error', error.message, 'error');
+                }
+            },
+
+            uploadQRIS: async (e) => {
+                e.preventDefault();
+                const file = document.getElementById('admin-qris-file').files[0];
+                if(!file) return;
+
+                Swal.fire({ 
+                    title: 'Mengupload QRIS...', 
+                    html: 'Mohon tunggu sebentar',
+                    allowOutsideClick: false,
+                    didOpen: () => Swal.showLoading() 
+                });
+
+                try {
+                    // Unique name based on timestamp to avoid caching issues
+                    const storageRef = ref(storage, 'settings/qris_' + Date.now()); 
+                    const snapshot = await uploadBytes(storageRef, file);
+                    const url = await getDownloadURL(snapshot.ref);
+
+                    // Save to Firestore (Singleton document)
+                    await setDoc(doc(db, "settings", "store_config"), {
+                        qrisUrl: url,
+                        updatedAt: serverTimestamp()
+                    }, { merge: true });
+
+                    Swal.fire('Sukses', 'QRIS Toko berhasil diperbarui!', 'success');
+                } catch (error) {
+                    console.error(error);
+                    Swal.fire('Error', 'Gagal upload: ' + error.message, 'error');
                 }
             },
 
@@ -548,15 +615,15 @@
             checkoutStep2_Payment: async (shippingInfo) => {
                 const totalAmount = state.cart.reduce((acc, item) => acc + item.price * item.qty, 0);
                 
-                // Show QRIS PopUp with File Upload
+                // Show QRIS PopUp (USING DYNAMIC QRIS FROM STATE)
                 const { value: file } = await Swal.fire({
                     title: 'Scan QRIS & Upload Bukti',
                     html: `
                         <div class="text-center mb-4">
-                            <p class="mb-2 text-sm text-gray-500">Silakan scan QRIS di bawah ini:</p>
-                            <div class="bg-gray-100 p-4 inline-block rounded-lg mb-2">
-                                <img src="https://upload.wikimedia.org/wikipedia/commons/thumb/d/d0/QR_code_for_mobile_English_Wikipedia.svg/1200px-QR_code_for_mobile_English_Wikipedia.svg.png" 
-                                     class="w-48 h-48 object-contain mx-auto mix-blend-multiply" alt="QRIS Code">
+                            <p class="mb-2 text-sm text-gray-500">Silakan scan QRIS Toko di bawah ini:</p>
+                            <div class="bg-white border-2 border-gray-200 p-2 inline-block rounded-lg mb-2">
+                                <img src="${state.qrisUrl}" 
+                                     class="w-48 h-48 object-contain mx-auto" alt="QRIS Code">
                             </div>
                             <p class="font-bold text-xl text-blue-600 mb-1">Rp ${totalAmount.toLocaleString('id-ID')}</p>
                             <p class="text-xs text-red-500 mb-4">*Transfer sesuai nominal tepat</p>
@@ -641,8 +708,7 @@
                     if (state.view === 'myOrders') app.render();
                 });
 
-                // Admin listens to ALL orders (Warning: In production, secure this with Rules)
-                // We assume current user is admin for demo simplicity if they access /admin
+                // Admin listens to ALL orders
                 const qAllOrders = query(collection(db, "orders"), orderBy("createdAt", "desc"));
                 onSnapshot(qAllOrders, (snapshot) => {
                     state.allOrders = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
