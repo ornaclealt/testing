@@ -135,11 +135,35 @@
             myOrders: [],  // For Customer
             // Default QRIS Placeholder
             qrisUrl: "https://upload.wikimedia.org/wikipedia/commons/thumb/d/d0/QR_code_for_mobile_English_Wikipedia.svg/1200px-QR_code_for_mobile_English_Wikipedia.svg.png", 
-            isCartOpen: false
+            isCartOpen: false,
+            hasError: false // New state to track permission errors
         };
 
         // --- 3. UI COMPONENTS (Renderer) ---
         const UI = {
+            errorView: () => `
+                <div class="max-w-3xl mx-auto px-4 py-16 text-center">
+                    <div class="bg-red-50 border-2 border-red-200 rounded-2xl p-8 shadow-sm">
+                        <i class="fa-solid fa-lock text-5xl text-red-500 mb-6"></i>
+                        <h2 class="text-2xl font-bold text-gray-800 mb-2">Akses Database Terkunci</h2>
+                        <p class="text-gray-600 mb-6">Firebase menolak akses data. Ini normal untuk project baru. Anda perlu membuka "Security Rules".</p>
+                        
+                        <div class="bg-white p-4 rounded-lg text-left text-sm border border-gray-200 mb-6">
+                            <p class="font-bold mb-2">Cara Memperbaiki (Wajib di Firebase Console):</p>
+                            <ol class="list-decimal pl-5 space-y-1 text-gray-700">
+                                <li>Buka <b>Firebase Console</b> > Project <b>${firebaseConfig.projectId}</b></li>
+                                <li>Masuk menu <b>Firestore Database</b> > Tab <b>Rules</b></li>
+                                <li>Ubah kode menjadi: <code class="bg-gray-100 px-1 rounded text-red-600">allow read, write: if true;</code></li>
+                                <li>Klik tombol <b>Publish</b></li>
+                            </ol>
+                        </div>
+                        
+                        <button onclick="window.location.reload()" class="bg-red-600 text-white px-6 py-3 rounded-lg font-bold hover:bg-red-700 transition shadow-lg">
+                            <i class="fa-solid fa-rotate-right mr-2"></i> Saya Sudah Ubah, Refresh Halaman
+                        </button>
+                    </div>
+                </div>
+            `,
             home: () => `
                 <div class="relative bg-white overflow-hidden">
                     <div class="max-w-7xl mx-auto">
@@ -170,6 +194,8 @@
                 </div>
             `,
             catalog: () => {
+                if (state.hasError) return UI.errorView();
+
                 const productsHTML = state.products.map(product => `
                     <div class="bg-white rounded-xl shadow-sm hover:shadow-xl transition duration-300 overflow-hidden border border-gray-100 group">
                         <div class="relative h-64 overflow-hidden bg-gray-200">
@@ -201,6 +227,7 @@
                 `;
             },
             myOrders: () => {
+                if (state.hasError) return UI.errorView();
                 if (!state.user) {
                     return `
                     <div class="max-w-7xl mx-auto px-4 py-20 text-center">
@@ -273,6 +300,7 @@
                 </div>`;
             },
             admin: () => {
+                if (state.hasError) return UI.errorView();
                 if (!state.user) return UI.myOrders(); // Reuse login prompt
 
                 // CMS DASHBOARD
@@ -380,6 +408,10 @@
                 const q = query(collection(db, "products"), orderBy("createdAt", "desc"));
                 onSnapshot(q, (snapshot) => {
                     state.products = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+                    // If success, clear error state
+                    if(state.hasError) {
+                         state.hasError = false;
+                    }
                     app.render();
                 }, (error) => app.handleError(error, 'Products'));
 
@@ -397,11 +429,18 @@
                 app.render();
             },
 
-            // --- IMAGE COMPRESSION HELPER (BARU: UNTUK MENGATASI UPLOAD LAMA) ---
+            // --- IMAGE COMPRESSION HELPER (OPTIMIZED: SMART SKIP & FAST RESIZE) ---
             compressImage: (file) => {
                 return new Promise((resolve, reject) => {
-                    // Maksimal ukuran sisi terpanjang
-                    const maxWidth = 1000; 
+                    // 1. SMART SKIP: Jika file < 1MB, tidak perlu kompresi (LANGSUNG UPLOAD)
+                    if (file.size < 1000000) { 
+                        console.log("File kecil (<1MB), skip kompresi.");
+                        resolve(file);
+                        return;
+                    }
+
+                    // 2. FAST RESIZE: Jika file besar, resize agresif agar cepat
+                    const maxWidth = 800; // Turunkan dari 1000px ke 800px agar lebih ringan
                     const reader = new FileReader();
                     reader.readAsDataURL(file);
                     reader.onload = (event) => {
@@ -430,13 +469,13 @@
                             const ctx = elem.getContext('2d');
                             ctx.drawImage(img, 0, 0, width, height);
                             
-                            // Kompres ke JPEG kualitas 70% (ukuran jadi jauh lebih kecil)
+                            // Kompres ke JPEG kualitas 60% (Cukup untuk bukti bayar, tapi size kecil)
                             ctx.canvas.toBlob((blob) => {
                                 resolve(new File([blob], file.name, {
                                     type: 'image/jpeg',
                                     lastModified: Date.now()
                                 }));
-                            }, 'image/jpeg', 0.7);
+                            }, 'image/jpeg', 0.6); // Turunkan kualitas ke 0.6
                         };
                         img.onerror = (err) => reject(err);
                     };
@@ -449,7 +488,12 @@
                 console.error(`Error in ${context}:`, error);
                 
                 // Cek apakah error karena permission denied
-                if (error.code === 'permission-denied') {
+                // Firestore error codes can be 'permission-denied' or inside message
+                if (error.code === 'permission-denied' || error.message.includes('permission') || error.message.includes('Missing or insufficient permissions')) {
+                    
+                    state.hasError = true;
+                    app.render(); // Force re-render to show UI Error State
+
                     // Gunakan flag agar tidak spam alert jika ada banyak listener gagal bersamaan
                     if (!window.hasShownPermissionAlert) {
                         window.hasShownPermissionAlert = true;
@@ -498,7 +542,7 @@
                 if (UI[state.view]) {
                     root.innerHTML = UI[state.view]();
                     // Khusus Admin, render order list manual
-                    if (state.view === 'admin' && state.user) {
+                    if (state.view === 'admin' && state.user && !state.hasError) {
                         app.renderAdminOrders();
                     }
                 }
