@@ -397,6 +397,53 @@
                 app.render();
             },
 
+            // --- IMAGE COMPRESSION HELPER (BARU: UNTUK MENGATASI UPLOAD LAMA) ---
+            compressImage: (file) => {
+                return new Promise((resolve, reject) => {
+                    // Maksimal ukuran sisi terpanjang
+                    const maxWidth = 1000; 
+                    const reader = new FileReader();
+                    reader.readAsDataURL(file);
+                    reader.onload = (event) => {
+                        const img = new Image();
+                        img.src = event.target.result;
+                        img.onload = () => {
+                            const elem = document.createElement('canvas');
+                            let width = img.width;
+                            let height = img.height;
+
+                            // Logika resize proporsional
+                            if (width > height) {
+                                if (width > maxWidth) {
+                                    height *= maxWidth / width;
+                                    width = maxWidth;
+                                }
+                            } else {
+                                if (height > maxWidth) {
+                                    width *= maxWidth / height;
+                                    height = maxWidth;
+                                }
+                            }
+
+                            elem.width = width;
+                            elem.height = height;
+                            const ctx = elem.getContext('2d');
+                            ctx.drawImage(img, 0, 0, width, height);
+                            
+                            // Kompres ke JPEG kualitas 70% (ukuran jadi jauh lebih kecil)
+                            ctx.canvas.toBlob((blob) => {
+                                resolve(new File([blob], file.name, {
+                                    type: 'image/jpeg',
+                                    lastModified: Date.now()
+                                }));
+                            }, 'image/jpeg', 0.7);
+                        };
+                        img.onerror = (err) => reject(err);
+                    };
+                    reader.onerror = (err) => reject(err);
+                });
+            },
+
             // --- HELPER UNTUK MENANGANI ERROR FIREBASE ---
             handleError: (error, context) => {
                 console.error(`Error in ${context}:`, error);
@@ -521,16 +568,19 @@
                 if(!file) return;
 
                 Swal.fire({ 
-                    title: 'Mengupload QRIS...', 
-                    html: 'Mohon tunggu sebentar',
+                    title: 'Memproses Gambar...', 
+                    html: 'Sedang mengompres dan mengupload...',
                     allowOutsideClick: false,
                     didOpen: () => Swal.showLoading() 
                 });
 
                 try {
-                    // Unique name based on timestamp to avoid caching issues
+                    // 1. Kompres Gambar Dulu
+                    const compressedFile = await app.compressImage(file);
+
+                    // 2. Upload Gambar Terkompresi
                     const storageRef = ref(storage, 'settings/qris_' + Date.now()); 
-                    const snapshot = await uploadBytes(storageRef, file);
+                    const snapshot = await uploadBytes(storageRef, compressedFile);
                     const url = await getDownloadURL(snapshot.ref);
 
                     // Save to Firestore (Singleton document)
@@ -539,7 +589,7 @@
                         updatedAt: serverTimestamp()
                     }, { merge: true });
 
-                    Swal.fire('Sukses', 'QRIS Toko berhasil diperbarui!', 'success');
+                    Swal.fire('Sukses', 'QRIS Toko berhasil diperbarui (Cepat)!', 'success');
                 } catch (error) {
                     console.error(error);
                     Swal.fire('Error', 'Gagal upload: ' + error.message, 'error');
@@ -701,19 +751,22 @@
                 if (file) {
                     // Start Upload Process
                     Swal.fire({
-                        title: 'Mengupload Bukti...',
-                        html: 'Mohon tunggu sebentar',
+                        title: 'Memproses Bukti...',
+                        html: 'Sedang mengompres dan mengupload gambar...',
                         allowOutsideClick: false,
                         didOpen: () => { Swal.showLoading(); }
                     });
 
                     try {
-                        // 1. Upload Image to Storage
-                        const storageRef = ref(storage, 'proofs/' + Date.now() + '_' + file.name);
-                        const snapshot = await uploadBytes(storageRef, file);
+                        // 1. Kompres Gambar Dulu
+                        const compressedFile = await app.compressImage(file);
+
+                        // 2. Upload Gambar Terkompresi
+                        const storageRef = ref(storage, 'proofs/' + Date.now() + '_' + compressedFile.name);
+                        const snapshot = await uploadBytes(storageRef, compressedFile);
                         const downloadURL = await getDownloadURL(snapshot.ref);
 
-                        // 2. Save Order to Firestore
+                        // 3. Save Order to Firestore
                         await addDoc(collection(db, "orders"), {
                             userId: state.user.uid,
                             customerName: shippingInfo.name,
@@ -725,7 +778,7 @@
                             createdAt: serverTimestamp()
                         });
 
-                        // 3. Reset & Success
+                        // 4. Reset & Success
                         state.cart = [];
                         app.toggleCart(false);
                         app.updateCartUI();
